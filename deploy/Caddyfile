@@ -1,0 +1,34 @@
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# Cross-origin isolation (enables SharedArrayBuffer / multi-threaded WASM if needed later).
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Embedder-Policy require-corp
+	}
+
+	# The design store (deploy/store): saved designs and the library page.
+	handle /api/* {
+		reverse_proxy store:8081
+	}
+	handle /library {
+		reverse_proxy store:8081
+	}
+
+	handle {
+		# Hashed build files never change; the page, service worker and build.json must revalidate.
+		@immutable path_regexp ^.+-[0-9a-f]{8,}\.(js|wasm|css)$
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		@fresh path / /index.html /sw.js /build.json
+		header @fresh Cache-Control "no-cache"
+		file_server
+	}
+}

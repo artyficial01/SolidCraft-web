@@ -1,0 +1,4 @@
+.git
+**/target
+plan
+**/node_modules

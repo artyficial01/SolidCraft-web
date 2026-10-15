@@ -1,0 +1,8 @@
+# Serves a web build you made yourself (fast to iterate on):
+#   (cd apps/solidcraft-web && trunk build --release)
+#   docker compose -f deploy/compose.yaml -f deploy/compose.prebuilt.yaml up --build -d
+FROM caddy:2-alpine
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY dist/web /srv
+EXPOSE 8080
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1

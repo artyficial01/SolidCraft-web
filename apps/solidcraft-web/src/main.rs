@@ -8,6 +8,10 @@
 
 #[cfg(target_arch = "wasm32")]
 mod files;
+#[cfg(any(target_arch = "wasm32", test))]
+mod plan;
+#[cfg(target_arch = "wasm32")]
+mod sync;
 
 #[cfg(target_arch = "wasm32")]
 mod web {

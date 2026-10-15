@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+# The design store (deploy/store): a small Rust server that keeps saved designs and their versions.
+FROM rust:1.95-bookworm AS build
+WORKDIR /src
+COPY deploy/store/ .
+RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/src/target \
+    cargo build --release && cp target/release/solidcraft-store /solidcraft-store
+# The data directory, owned by the unprivileged user the runtime image runs as.
+RUN mkdir /data
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=build /solidcraft-store /solidcraft-store
+COPY --from=build --chown=65532:65532 /data /data
+ENV STORE_DIR=/data STORE_ADDR=0.0.0.0:8081
+EXPOSE 8081
+ENTRYPOINT ["/solidcraft-store"]

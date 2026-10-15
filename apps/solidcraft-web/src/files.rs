@@ -64,7 +64,7 @@ pub struct Files {
 }
 
 impl Files {
-    fn say(&self, text: impl Into<String>, error: bool) {
+    pub(crate) fn say(&self, text: impl Into<String>, error: bool) {
         self.messages.borrow_mut().push((text.into(), error));
         self.wake();
     }
@@ -76,7 +76,7 @@ impl Files {
     }
 
     /// Run a frame (the app sleeps until something happens).
-    fn wake(&self) {
+    pub(crate) fn wake(&self) {
         if let Some(c) = self.ctx.borrow().as_ref() {
             c.request_repaint();
         }
@@ -127,7 +127,7 @@ pub fn local_only() -> bool {
     LOCAL.with(Cell::get)
 }
 
-fn err(e: JsValue) -> String {
+pub(crate) fn err(e: JsValue) -> String {
     e.as_string().or_else(|| Reflect::get(&e, &"message".into()).ok().and_then(|m| m.as_string())).unwrap_or_else(|| format!("{e:?}"))
 }
 
@@ -166,7 +166,7 @@ async fn file_handle(dir: &FileSystemDirectoryHandle, name: &str, create: bool) 
     JsFuture::from(dir.get_file_handle_with_options(name, &opts)).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())
 }
 
-async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
+pub(crate) async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
     if local_only() {
         return local()?
             .set_item(&format!("{LOCAL_PREFIX}{name}"), &encode(bytes))
@@ -190,6 +190,19 @@ async fn remove_file(name: &str) -> Result<(), String> {
     let dir = root().await?;
     JsFuture::from(dir.remove_entry(name)).await.map_err(err)?;
     Ok(())
+}
+
+/// When the stored file `name` was last written (ms since 1970), as the browser reports it.
+pub(crate) async fn stored_modified(name: &str) -> Option<f64> {
+    let dir = root().await.ok()?;
+    let h = file_handle(&dir, name, false).await.ok()?;
+    let file: web_sys::File = JsFuture::from(h.get_file()).await.ok()?.dyn_into().ok()?;
+    Some(file.last_modified())
+}
+
+/// The autosave files: never synced to a server (they belong to this browser).
+pub(crate) fn is_recovery_file(name: &str) -> bool {
+    name == RECOVERY || name == LEGACY_RECOVERY || name == RECOVERY_META
 }
 
 /// Every stored file in local storage.
@@ -289,6 +302,7 @@ pub fn start(files: &Rc<Files>) {
         }
         files.ready.set(true);
         files.wake();
+        crate::sync::start(&files);
     });
 }
 
@@ -307,8 +321,9 @@ pub fn flush(files: &Rc<Files>) {
             }
             let files = files.clone();
             spawn_local(async move {
-                if let Err(e) = write_file(&name, &bytes).await {
-                    files.say(format!("{name}: {e}"), true);
+                match write_file(&name, &bytes).await {
+                    Err(e) => files.say(format!("{name}: {e}"), true),
+                    Ok(()) => crate::sync::after_write(&files, &name, &bytes).await,
                 }
             });
         } else if let Some(name) = path.strip_prefix(DOWNLOADS)
@@ -344,14 +359,28 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
 
 /// Delete a stored design.
 pub fn delete(files: &Rc<Files>, name: &str) {
-    let _ = vfs::remove(&format!("{OPFS}{name}"));
-    files.entries.borrow_mut().retain(|e| e.name != name);
+    forget(files, name);
     let (files, name) = (files.clone(), name.to_string());
     spawn_local(async move {
-        if let Err(e) = remove_file(&name).await {
-            files.say(format!("{name}: {e}"), true);
+        match remove_file(&name).await {
+            Err(e) => files.say(format!("{name}: {e}"), true),
+            Ok(()) => crate::sync::after_delete(&files, &name).await,
         }
     });
+}
+
+/// Delete a stored design here only (the server deleted it).
+pub(crate) async fn delete_local(files: &Rc<Files>, name: &str) {
+    forget(files, name);
+    if let Err(e) = remove_file(name).await {
+        files.say(format!("{name}: {e}"), true);
+    }
+}
+
+/// Drop a design from the engine's files and the panel's list.
+fn forget(files: &Rc<Files>, name: &str) {
+    let _ = vfs::remove(&format!("{OPFS}{name}"));
+    files.entries.borrow_mut().retain(|e| e.name != name);
 }
 
 /// Rename a stored design (a copy under the new name, then the old one goes: not every browser

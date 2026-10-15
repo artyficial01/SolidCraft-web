@@ -1,0 +1,5 @@
+# Add to compose.yaml to package your own `trunk build --release` instead of building in Docker.
+services:
+  solidcraft:
+    build:
+      dockerfile: deploy/Dockerfile.prebuilt

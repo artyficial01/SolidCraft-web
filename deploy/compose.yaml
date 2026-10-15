@@ -1,0 +1,40 @@
+services:
+  solidcraft:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: solidcraft-web:local
+    depends_on: [store]
+    # Localhost only by default. Set SOLIDCRAFT_BIND=0.0.0.0 to expose on the network (use HTTPS for WebGPU).
+    ports:
+      - "${SOLIDCRAFT_BIND:-127.0.0.1}:${SOLIDCRAFT_PORT:-8080}:8080"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]  # the caddy binary carries this file capability; it will not exec without it
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/data, /config]
+
+  # Saved designs and their earlier versions. Not published: only the web server above reaches it.
+  store:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.store
+    image: solidcraft-store:local
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - projects:/data
+    environment:
+      STORE_KEEP_VERSIONS: "100"
+    healthcheck:
+      test: ["CMD", "/solidcraft-store", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  # Back this up (or bind-mount a folder instead): projects/ holds the designs, history/ their versions.
+  projects:
