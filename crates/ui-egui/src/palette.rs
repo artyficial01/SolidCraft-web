@@ -78,7 +78,8 @@ pub(crate) fn palette_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                         // The JSON example keeps its braces here rather than in the catalog, so the
                         // placeholder parser never has to treat JSON punctuation as a name.
                         .hint_text(crate::i18n::format("ui.command_palette_hint", &[("example", "Extrude {\"distance\": 20}")]))
-                        .desired_width(520.0),
+                        // Follows the card's width when it is narrowed (a docked bar is wide, so 520).
+                        .desired_width((ui.available_width() - 150.0).clamp(80.0, 520.0)),
                 );
                 if app.palette.focus {
                     r.request_focus();

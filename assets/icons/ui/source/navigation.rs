@@ -149,18 +149,108 @@ pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, h
     }
 }
 pub(crate) const AXIS_RADIUS: f32 = 11.0;
-pub(crate) fn axis_tip(painter: &egui::Painter, c: Pos2, name: &str, d: &Vec3, at: Pos2, depth: f64, hovered: bool, t: Tokens) {
-    let col = if d.x != 0.0 {
+
+/// The token colour of the axis a direction lies along.
+fn axis_colour(d: &Vec3, t: &Tokens) -> Color32 {
+    if d.x != 0.0 {
         t.triad[0]
     } else if d.y != 0.0 {
         t.triad[1]
     } else {
         t.triad[2]
+    }
+}
+
+/// 0 for a point at the back of the sphere, 1 for the front: how much of the way to full strength.
+fn facing(depth: f64) -> f32 {
+    ((depth as f32).clamp(-1.0, 1.0) * 0.5 + 0.5).powf(0.8)
+}
+
+/// The orbit gizmo: a shaded sphere with one ring per axis plane, turning with the camera, and the
+/// six signed axes as marks on it. `basis` is the camera's (right, up, back), `radius` the
+/// sphere's, `tips` the signed axes sorted back to front, `active` while the pointer is over the
+/// gizmo or dragging it. Rings and marks behind the sphere are drawn first and fainter, so the
+/// front ones cross over them.
+pub(crate) fn orbit_gizmo(
+    painter: &egui::Painter,
+    c: Pos2,
+    basis: (Vec3, Vec3, Vec3),
+    radius: f32,
+    tips: &[(&'static str, Vec3, Pos2, f64)],
+    hovered: Option<usize>,
+    active: bool,
+    t: Tokens,
+) {
+    let (right, up, back) = basis;
+    let project = |v: Vec3| (c + vec2((v.dot(right) as f32) * radius, -(v.dot(up) as f32) * radius), v.dot(back));
+    // The sphere: a soft body, a lighter spot where light would fall, and a fine outline.
+    let body = radius + 10.0;
+    painter.circle_filled(c, body, t.overlay.gamma_multiply(if active { 1.0 } else { 0.6 }));
+    // Stacked, shrinking discs give the highlight a soft edge.
+    for k in 0..5 {
+        let r = body * (0.62 - 0.1 * k as f32);
+        painter.circle_filled(c + vec2(-body * 0.28, -body * 0.32), r, t.cube_face.gamma_multiply(if active { 0.05 } else { 0.026 }));
+    }
+    painter.circle_stroke(c, body, Stroke::new(1.0, t.cube_border.gamma_multiply(if active { 0.9 } else { 0.5 })));
+
+    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+    let ring = |k: usize, front: bool| {
+        let (a, b) = (axes[(k + 1) % 3], axes[(k + 2) % 3]);
+        let n = 72;
+        let pts: Vec<_> = (0..=n)
+            .map(|i| {
+                let th = std::f64::consts::TAU * f64::from(i) / f64::from(n);
+                project(a * th.cos() + b * th.sin())
+            })
+            .collect();
+        for w in pts.windows(2) {
+            let (p0, d0) = w[0];
+            let (p1, d1) = w[1];
+            let depth = (d0 + d1) * 0.5;
+            if (depth >= 0.0) != front {
+                continue;
+            }
+            let strength = facing(depth);
+            let colour = t.triad[k].gamma_multiply(0.18 + 0.82 * strength * if active { 1.0 } else { 0.8 });
+            painter.line_segment([p0, p1], Stroke::new(if front { 1.0 + 1.2 * strength } else { 1.0 }, colour));
+        }
     };
-    let positive = !name.starts_with('-');
-    let ink = if depth < -0.01 { col.gamma_multiply(0.55) } else { col };
-    painter.line_segment([c, at], Stroke::new(if positive { 2.0 } else { 1.0 }, ink));
-    painter.circle_filled(at, AXIS_RADIUS, if hovered { t.accent_soft } else { t.overlay });
-    painter.circle_stroke(at, AXIS_RADIUS, Stroke::new(if hovered { 2.0 } else { 1.0 }, if hovered { t.accent } else { ink }));
-    painter.text(at, Align2::CENTER_CENTER, name.to_uppercase(), FontId::proportional(11.0), ink);
+    let mark = |i: usize, tip: &(&'static str, Vec3, Pos2, f64)| {
+        let (name, d, at, depth) = tip;
+        let positive = !name.starts_with('-');
+        let hot = hovered == Some(i);
+        let ink = axis_colour(d, &t).gamma_multiply(0.45 + 0.55 * facing(*depth));
+        let scale = 0.86 + 0.14 * facing(*depth);
+        if positive {
+            let r = 10.0 * scale;
+            painter.circle_filled(*at, r + 1.5, t.panel.gamma_multiply(0.55));
+            painter.circle_filled(*at, r, if hot { t.accent_soft } else { t.panel });
+            painter.circle_stroke(*at, r, Stroke::new(if hot { 2.2 } else { 1.8 }, if hot { t.accent } else { ink }));
+            // One fixed label size: a size that changes with the view would rasterize new glyphs every frame.
+            painter.text(*at, Align2::CENTER_CENTER, name.to_uppercase(), FontId::proportional(11.0), if hot { t.text } else { ink });
+        } else {
+            let r = if hot { 9.0 } else { 4.6 * scale };
+            painter.circle_filled(*at, r, if hot { t.accent_soft } else { ink.gamma_multiply(0.85) });
+            if hot {
+                painter.circle_stroke(*at, r, Stroke::new(2.0, t.accent));
+                painter.text(*at, Align2::CENTER_CENTER, name.to_uppercase(), FontId::proportional(10.0), t.text);
+            }
+        }
+    };
+    for k in 0..3 {
+        ring(k, false);
+    }
+    for (i, tip) in tips.iter().enumerate().filter(|(_, tip)| tip.3 < 0.0) {
+        mark(i, tip);
+    }
+    // Thin spokes from the centre to the positive axes, then the near halves of the rings.
+    for (_, d, at, depth) in tips.iter().filter(|tip| !tip.0.starts_with('-')) {
+        painter.line_segment([c, *at], Stroke::new(1.3, axis_colour(d, &t).gamma_multiply(0.3 + 0.5 * facing(*depth))));
+    }
+    for k in 0..3 {
+        ring(k, true);
+    }
+    for (i, tip) in tips.iter().enumerate().filter(|(_, tip)| tip.3 >= 0.0) {
+        mark(i, tip);
+    }
 }

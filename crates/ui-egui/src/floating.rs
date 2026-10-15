@@ -38,8 +38,20 @@ pub enum Which {
 }
 
 impl Which {
-    fn resizable(self) -> bool {
-        self == Which::Browser
+    /// The directions the user can resize in, `(width, height)`: the toolbar, timeline and
+    /// command line are one row tall, so they only change width.
+    fn resize_axes(self) -> (bool, bool) {
+        (true, self == Which::Browser)
+    }
+
+    /// The smallest contents the card can be dragged to.
+    fn min_size(self) -> Vec2 {
+        match self {
+            Which::Toolbar => vec2(420.0, TOOLBAR_H),
+            Which::Browser => vec2(180.0, 120.0),
+            Which::Timeline => vec2(260.0, TIMELINE_H),
+            Which::Palette => vec2(240.0, PALETTE_H),
+        }
     }
 
     fn index(self) -> u8 {
@@ -55,7 +67,7 @@ pub struct Slot {
     pub offset: [f32; 2],
     /// Only its title strip is shown.
     pub minimized: bool,
-    /// Its contents' size, once the user has resized it (the browser).
+    /// Its contents' size, once the user has resized it.
     pub size: Option<[f32; 2]>,
 }
 
@@ -146,6 +158,26 @@ pub fn clamp_pos(pos: Pos2, avail: Rect, outer: Vec2) -> Pos2 {
     pos2(x, y)
 }
 
+/// `want` as a contents size for `which` in `avail`: within its limits, and the height left as it
+/// was (`natural`) for the cards that only change width.
+pub fn clamp_size(which: Which, want: Vec2, natural: Vec2, avail: Rect) -> Vec2 {
+    let min = which.min_size();
+    let max_w = (avail.width() - 2.0 * (MARGIN + PAD)).max(min.x);
+    let max_h = (avail.height() - 2.0 * MARGIN - STRIP_H - 2.0 * PAD).max(min.y);
+    let w = if want.x.is_finite() { want.x.clamp(min.x, max_w) } else { natural.x.clamp(min.x, max_w) };
+    let h = if which.resize_axes().1 && want.y.is_finite() { want.y.clamp(min.y, max_h) } else { natural.y };
+    vec2(w, h)
+}
+
+/// The offset that keeps a card's top left where it is when its contents become `size`. A card
+/// is placed from its default place, which depends on its size: a centred card would otherwise
+/// grow in both directions.
+pub fn offset_after_resize(which: Which, avail: Rect, pos: Pos2, size: Vec2, minimized: bool) -> [f32; 2] {
+    let outer = outer_size(size, minimized);
+    let o = clamp_pos(pos, avail, outer) - default_pos(which, avail, outer);
+    [o.x, o.y]
+}
+
 /// The width the toolbar and timeline take in `avail`.
 pub fn wide(avail: Rect, max: f32) -> f32 {
     (avail.width() - 2.0 * (MARGIN + PAD)).clamp(160.0, max)
@@ -178,11 +210,10 @@ pub fn card(app: &mut SolveApp, ui: &Ui, which: Which, title: &str, size: Vec2, 
     let t = Tokens::get();
     let avail = ui.available_rect_before_wrap();
     let slot = app.preferences.floating.slot(which).clone();
+    let natural = size;
     let size = match slot.size {
-        Some([w, h]) if which.resizable() && w.is_finite() && h.is_finite() => {
-            vec2(w.clamp(180.0, 700.0), h.clamp(120.0, (avail.height() - 2.0 * MARGIN).max(120.0)))
-        }
-        _ => size,
+        Some([w, h]) if w.is_finite() && h.is_finite() => clamp_size(which, vec2(w, h), natural, avail),
+        _ => natural,
     };
     let minimized = slot.minimized;
     let outer = outer_size(size, minimized);
@@ -215,14 +246,11 @@ pub fn card(app: &mut SolveApp, ui: &Ui, which: Which, title: &str, size: Vec2, 
                     ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                     add(app, ui);
                 });
-                if which.resizable() {
-                    let grip = Rect::from_min_size(rect.right_bottom() - vec2(16.0, 16.0), vec2(16.0, 16.0));
-                    let resp = ui.interact(grip, id.with("resize"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
-                    let c = if resp.hovered() || resp.dragged() { t.text } else { t.text_dim };
-                    for k in [4.0, 8.0, 12.0] {
-                        ui.painter().line_segment([grip.right_bottom() - vec2(k, 2.0), grip.right_bottom() - vec2(2.0, k)], Stroke::new(1.0, c));
-                    }
-                    // From where the corner was grabbed, so a press that arrives with a jump changes nothing.
+                let (rx, ry) = which.resize_axes();
+                // Handles on the right edge, the bottom edge (the browser) and the corner. A drag is
+                // measured from where it was grabbed, so a press that arrives with a jump changes nothing.
+                let mut handle = |ui: &Ui, area: Rect, name: &str, cursor: egui::CursorIcon, mask: (bool, bool)| -> bool {
+                    let resp = ui.interact(area, id.with(name), Sense::drag()).on_hover_cursor(cursor);
                     let grab = id.with("resize_grab");
                     if resp.drag_started()
                         && let Some(p) = resp.interact_pointer_pos()
@@ -232,8 +260,37 @@ pub fn card(app: &mut SolveApp, ui: &Ui, which: Which, title: &str, size: Vec2, 
                     if resp.dragged()
                         && let (Some(p), Some((p0, s0))) = (resp.interact_pointer_pos(), ui.data(|d| d.get_temp::<(Pos2, Vec2)>(grab)))
                     {
-                        resized_to = Some(s0 + (p - p0));
+                        let d = p - p0;
+                        resized_to = Some(vec2(if mask.0 && rx { s0.x + d.x } else { size.x }, if mask.1 && ry { s0.y + d.y } else { size.y }));
                     }
+                    resp.hovered() || resp.dragged()
+                };
+                let reach = PAD + 2.0;
+                let right = Rect::from_min_max(pos2(rect.right() - 2.0, rect.top()), pos2(rect.right() + reach, rect.bottom() - 12.0));
+                let bottom = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 2.0), pos2(rect.right() - 12.0, rect.bottom() + reach));
+                let corner = Rect::from_min_max(rect.right_bottom() - vec2(12.0, 12.0), rect.right_bottom() + vec2(reach, reach));
+                let hot_right = rx && handle(ui, right, "resize_right", egui::CursorIcon::ResizeHorizontal, (true, false));
+                let hot_bottom = ry && handle(ui, bottom, "resize_bottom", egui::CursorIcon::ResizeVertical, (false, true));
+                let cursor = if ry { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeHorizontal };
+                let hot_corner = handle(ui, corner, "resize_corner", cursor, (true, true));
+                let line = Stroke::new(2.0, t.accent);
+                let mid = rect.right() + PAD * 0.5;
+                if hot_right || hot_corner {
+                    ui.painter().line_segment([pos2(mid, rect.top() + 2.0), pos2(mid, rect.bottom() - 2.0)], line);
+                }
+                if hot_bottom || (hot_corner && ry) {
+                    let y = rect.bottom() + PAD * 0.5;
+                    ui.painter().line_segment([pos2(rect.left() + 2.0, y), pos2(rect.right() - 2.0, y)], line);
+                }
+                // What can be dragged: a diagonal grip at the corner, or a short bar at the right edge.
+                let ink = if hot_corner { t.text } else { t.text_dim };
+                if ry {
+                    for k in [4.0, 8.0, 12.0] {
+                        ui.painter().line_segment([rect.right_bottom() - vec2(k, 2.0), rect.right_bottom() - vec2(2.0, k)], Stroke::new(1.0, ink));
+                    }
+                } else if !hot_right {
+                    let c = pos2(rect.right() + PAD * 0.5, rect.center().y);
+                    ui.painter().line_segment([c - vec2(0.0, 7.0), c + vec2(0.0, 7.0)], Stroke::new(2.0, t.text_dim.gamma_multiply(0.5)));
                 }
             }
         });
@@ -250,7 +307,9 @@ pub fn card(app: &mut SolveApp, ui: &Ui, which: Which, title: &str, size: Vec2, 
         slot.minimized = !slot.minimized;
     }
     if let Some(s) = resized_to {
-        slot.size = Some([s.x.clamp(180.0, 700.0), s.y.clamp(120.0, (avail.height() - 2.0 * MARGIN).max(120.0))]);
+        let s = clamp_size(which, s, natural, avail);
+        slot.size = Some([s.x, s.y]);
+        slot.offset = offset_after_resize(which, avail, pos, s, minimized);
     }
 }
 
@@ -349,6 +408,30 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_card_size_is_used_and_kept_inside_the_window() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1400.0, "height": 900.0}));
+        h.app.preferences.floating_layout = true;
+        h.app.preferences.floating.toolbar.size = Some([700.0, 500.0]);
+        h.app.preferences.floating.browser.size = Some([320.0, 300.0]);
+        h.settle();
+        let cards = h.app.viewport.float_cards.clone();
+        assert_eq!(cards.len(), 4);
+        // Contents plus the card's padding; the one-row toolbar ignores the height it was given.
+        assert_eq!(cards[0].width(), 700.0 + 2.0 * PAD);
+        assert_eq!(cards[0].height(), STRIP_H + TOOLBAR_H + 2.0 * PAD);
+        assert_eq!((cards[1].width(), cards[1].height()), (320.0 + 2.0 * PAD, STRIP_H + 300.0 + 2.0 * PAD));
+        // A size from a bigger window is cut down to this one, and a nonsense size is ignored.
+        h.app.preferences.floating.toolbar.size = Some([90_000.0, 92.0]);
+        h.app.preferences.floating.timeline.size = Some([f32::NAN, f32::INFINITY]);
+        h.settle();
+        let window = h.app.viewport.rect.expect("a viewport");
+        for c in &h.app.viewport.float_cards {
+            assert!(window.contains_rect(*c), "{c:?} must stay in {window:?}");
+        }
+    }
+
+    #[test]
     fn old_preferences_open_docked_and_a_saved_layout_comes_back() {
         let old: crate::prefs::Prefs = serde_json::from_value(json!({"theme": "light"})).unwrap();
         assert!(!old.floating_layout);
@@ -407,6 +490,39 @@ mod tests {
         let moved_toolbar = Rect::from_min_size(pos2(12.0, 46.0), vec2(900.0, 130.0));
         let moved_timeline = Rect::from_min_size(pos2(12.0, 835.0), vec2(300.0, 58.0));
         assert_eq!(insets(&[moved_toolbar, moved_timeline, browser], vp, 100.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_resized_card_keeps_within_its_limits_and_the_one_row_cards_keep_their_height() {
+        let avail = window();
+        let natural = vec2(1000.0, TOOLBAR_H);
+        let s = clamp_size(Which::Toolbar, vec2(50.0, 900.0), natural, avail);
+        assert_eq!(s, vec2(Which::Toolbar.min_size().x, TOOLBAR_H), "too narrow, and a toolbar keeps its height");
+        let s = clamp_size(Which::Toolbar, vec2(9000.0, 10.0), natural, avail);
+        assert_eq!(s.x, avail.width() - 2.0 * (MARGIN + PAD), "no wider than the window");
+        let b = clamp_size(Which::Browser, vec2(10.0, 10.0), vec2(250.0, 400.0), avail);
+        assert_eq!(b, Which::Browser.min_size());
+        let b = clamp_size(Which::Browser, vec2(300.0, 9000.0), vec2(250.0, 400.0), avail);
+        assert_eq!(b.x, 300.0);
+        assert!(b.y < avail.height(), "no taller than the window: {b:?}");
+        // A size that is not a number falls back to the natural one.
+        assert_eq!(clamp_size(Which::Timeline, vec2(f32::NAN, f32::NAN), vec2(800.0, TIMELINE_H), avail), vec2(800.0, TIMELINE_H));
+    }
+
+    #[test]
+    fn resizing_keeps_a_cards_top_left_where_it_was() {
+        let avail = window();
+        for which in [Which::Toolbar, Which::Timeline, Which::Palette] {
+            let before = vec2(900.0, 40.0);
+            let outer = outer_size(before, false);
+            let pos = clamp_pos(default_pos(which, avail, outer) + vec2(30.0, -20.0), avail, outer);
+            for width in [500.0, 700.0, 1100.0] {
+                let after = vec2(width, 40.0);
+                let o = offset_after_resize(which, avail, pos, after, false);
+                let placed = clamp_pos(default_pos(which, avail, outer_size(after, false)) + vec2(o[0], o[1]), avail, outer_size(after, false));
+                assert!((placed.x - pos.x).abs() < 0.01 && (placed.y - pos.y).abs() < 0.01, "{which:?} at {width}: {pos:?} -> {placed:?}");
+            }
+        }
     }
 
     #[test]
