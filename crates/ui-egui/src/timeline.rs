@@ -161,7 +161,14 @@ fn toggle_feature(app: &mut SolveApp, id: u64) {
 
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    egui::Panel::bottom("sc_timeline").exact_size(40.0).frame(egui::Frame::NONE.fill(t.timeline)).show(ui, |ui| {
+    egui::Panel::bottom("sc_timeline").exact_size(40.0).frame(egui::Frame::NONE.fill(t.timeline)).show(ui, |ui| timeline_body(app, ui));
+}
+
+/// The timeline's contents, drawn into `ui.max_rect()`: the docked panel and the floating card
+/// (`floating`) both call it.
+pub(crate) fn timeline_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    {
         let r = ui.max_rect();
         let p = ui.painter().clone();
         p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, t.border));
@@ -420,7 +427,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
-    });
+    }
 }
 
 /// Select what a feature made, so the browser shows it.

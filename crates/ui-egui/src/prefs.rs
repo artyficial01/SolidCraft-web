@@ -231,6 +231,11 @@ pub struct Prefs {
     pub timeline_left_height: f32,
     /// Whether the browser below the left feature history is collapsed.
     pub timeline_left_browser_collapsed: bool,
+    /// The toolbar, browser, timeline and command line float over a full-window viewport instead
+    /// of being docked around it (`floating`).
+    pub floating_layout: bool,
+    /// Where each floating card was left (moved, resized, minimized).
+    pub floating: crate::floating::Layout,
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     pub zoom_to_cursor: bool,
     /// Spread discrete wheel input across frames (off: apply each event immediately).
@@ -302,6 +307,8 @@ impl Default for Prefs {
             timeline_left: false,
             timeline_left_height: 360.0,
             timeline_left_browser_collapsed: false,
+            floating_layout: false,
+            floating: crate::floating::Layout::default(),
             zoom_to_cursor: true,
             smooth_wheel_zoom: true,
             trackpad_pan: true,
@@ -402,6 +409,8 @@ fn defaults(app: &mut SolveApp, page: usize) {
             p.timeline_left = d.timeline_left;
             p.timeline_left_height = d.timeline_left_height;
             p.timeline_left_browser_collapsed = d.timeline_left_browser_collapsed;
+            p.floating_layout = d.floating_layout;
+            p.floating = d.floating;
             p.default_units = d.default_units;
             p.length_decimals = d.length_decimals;
             p.angle_decimals = d.angle_decimals;
@@ -891,6 +900,19 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             });
             ui.end_row();
             note(ui, app.tr("ui.timeline_left_note"));
+            ui.label(app.tr("ui.panel_layout"));
+            let docked = app.tr("ui.layout_docked").to_string();
+            let floating = app.tr("ui.layout_floating").to_string();
+            let reset = app.tr("ui.layout_reset").to_string();
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut app.preferences.floating_layout, false, docked);
+                ui.radio_value(&mut app.preferences.floating_layout, true, floating);
+                if app.preferences.floating_layout && ui.button(reset).clicked() {
+                    app.preferences.floating.reset();
+                }
+            });
+            ui.end_row();
+            note(ui, app.tr("ui.layout_note"));
             ui.label(app.tr("ui.units_of_new_designs"));
             egui::ComboBox::from_id_salt("pref_units").selected_text(app.preferences.default_units.clone()).show_ui(ui, |ui| {
                 for u in UNITS {

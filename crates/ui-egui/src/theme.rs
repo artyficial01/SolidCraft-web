@@ -369,7 +369,16 @@ fn visuals(dark: bool) -> egui::Visuals {
     v.widgets.hovered.bg_fill = t.hover;
     // egui uses the open-state fill for a movable window's active title bar.
     v.widgets.open.weak_bg_fill = t.panel_header;
-    v.window_corner_radius = egui::CornerRadius::same(6);
+    v.window_corner_radius = egui::CornerRadius::same(10);
+    v.menu_corner_radius = egui::CornerRadius::same(8);
+    // Rounder controls and softer, larger shadows: the look of the floating cards and dialogs.
+    let round = egui::CornerRadius::same(6);
+    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+        w.corner_radius = round;
+    }
+    let shadow = |blur: u8, alpha: u8| egui::Shadow { offset: [0, 4], blur, spread: 0, color: Color32::from_black_alpha(alpha) };
+    v.window_shadow = shadow(24, if dark { 110 } else { 55 });
+    v.popup_shadow = shadow(16, if dark { 100 } else { 50 });
     v
 }
 
@@ -378,8 +387,9 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
     ctx.set_visuals(visuals(dark));
     ctx.global_style_mut(|s| {
+        // Wider buttons, the same row height: layouts that count rows keep their positions.
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
-        s.spacing.button_padding = egui::vec2(6.0, 3.0);
+        s.spacing.button_padding = egui::vec2(8.0, 3.0);
     });
 }
 

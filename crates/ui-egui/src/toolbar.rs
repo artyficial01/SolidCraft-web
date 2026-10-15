@@ -176,6 +176,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.painter().text(pos2(left + 36.0, r.center().y), Align2::LEFT_CENTER, "SolidCraft", FontId::proportional(14.0), t.app_bar_text);
         }
         let mut x = left + if compact_actions { 60.0 } else { 128.0 };
+        let floating = app.preferences.floating_layout;
         // A disabled button is dimmed and ignores clicks (its tooltip still shows).
         let mut click = |ui: &mut egui::Ui, icon: &str, tip: &str, enabled: bool| -> bool {
             let width = if compact_actions { 22.0 } else { 26.0 };
@@ -187,7 +188,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.painter().rect_filled(br, 4.0, Color32::from_white_alpha(30));
             }
             let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.35) };
-            icons::paint(ui.painter(), br.shrink(5.0), icon, dim(t.app_bar_icon[0]), dim(t.app_bar_icon[1]), dim(t.app_bar_icon[2]));
+            match icon {
+                "layout" | "panels" => {
+                    paint_layout_glyph(ui.painter(), br.shrink(5.0), icon == "panels", floating, dim(t.app_bar_icon[0]), dim(t.app_bar_icon[2]))
+                }
+                _ => icons::paint(ui.painter(), br.shrink(5.0), icon, dim(t.app_bar_icon[0]), dim(t.app_bar_icon[1]), dim(t.app_bar_icon[2])),
+            }
             let clicked = resp.on_hover_text(tip).clicked();
             enabled && clicked
         };
@@ -218,6 +224,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if !compact_actions && click(ui, if app.ui.dark { "sun" } else { "moon" }, theme_tip, true) {
             app.ui.dark = !app.ui.dark;
             app.preferences.theme = if app.ui.dark { "dark" } else { "light" }.into();
+        }
+        // Docked panels or floating cards (Preferences, General, Panel layout).
+        let layout_tip =
+            format!("{}: {}", app.tr("ui.panel_layout"), if floating { app.tr("ui.layout_floating") } else { app.tr("ui.layout_docked") });
+        if !compact_actions && click(ui, "layout", &layout_tip, true) {
+            app.preferences.floating_layout = !app.preferences.floating_layout;
+        }
+        // Minimize every floating card for a clear canvas, or bring them all back.
+        if floating && !compact_actions && click(ui, "panels", crate::i18n::tr_label("Minimize or restore all panels"), true) {
+            app.preferences.floating.toggle_all();
         }
         if click(ui, "help", app.tr("ui.help"), true) {
             app.help.menu = !app.help.menu;
@@ -485,8 +501,15 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
 
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
+    egui::Panel::top("sc_toolbar").exact_size(92.0).frame(egui::Frame::NONE.fill(t.toolbar)).show(ui, |ui| toolbar_body(app, ui));
+}
+
+/// The toolbar's contents, drawn into `ui.max_rect()`: the docked panel and the floating card
+/// (`floating`) both call it.
+pub(crate) fn toolbar_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
     let sketching = app.session.active_sketch.is_some();
-    egui::Panel::top("sc_toolbar").exact_size(92.0).frame(egui::Frame::NONE.fill(t.toolbar)).show(ui, |ui| {
+    {
         let r = ui.max_rect();
         let painter = ui.painter().clone();
         // Right-click on the toolbar's empty space: its own menu. Interacted first, so every
@@ -530,10 +553,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let active = app.ui.tab == tab;
             let resp = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
             if active {
+                // A pill, tinted in the tab's colour.
                 let c = if tab == "SKETCH" { t.sketch_accent } else { t.accent };
-                painter.line_segment([pos2(tr.left() + 4.0, tr.bottom() - 1.0), pos2(tr.right() - 4.0, tr.bottom() - 1.0)], Stroke::new(2.0, c));
+                painter.rect_filled(tr, 11.0, c.gamma_multiply(0.22));
+                painter.rect_stroke(tr, 11.0, Stroke::new(1.0, c.gamma_multiply(0.55)), egui::StrokeKind::Inside);
             } else if resp.hovered() {
-                painter.rect_filled(tr, 4.0, t.hover);
+                painter.rect_filled(tr, 11.0, t.hover);
             }
             let col = if tab == "SKETCH" {
                 t.sketch_accent
@@ -894,7 +919,45 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
-    });
+    }
+}
+
+/// The panel layout buttons' glyphs, drawn here (not in the icon set): a window showing the mode
+/// it is in (docked panels along the edges, or floating cards), and, for `panels`, a window with
+/// its cards shrunk to bars (minimize or restore all).
+fn paint_layout_glyph(painter: &egui::Painter, r: Rect, panels: bool, floating: bool, ink: Color32, accent: Color32) {
+    let s = Stroke::new(1.3, ink);
+    painter.rect_stroke(r, 3.0, s, egui::StrokeKind::Inside);
+    let inner = r.shrink(3.0);
+    if panels {
+        for k in 0..3 {
+            let y = inner.top() + 1.0 + k as f32 * (inner.height() - 3.0) / 2.0;
+            painter.line_segment(
+                [pos2(inner.left() + 1.0, y + 1.0), pos2(inner.right() - 1.0 - k as f32 * 2.0, y + 1.0)],
+                Stroke::new(1.5, if k == 1 { accent } else { ink }),
+            );
+        }
+    } else if floating {
+        painter.rect_filled(Rect::from_min_size(inner.min + vec2(0.5, 0.5), vec2(inner.width() * 0.55, inner.height() * 0.38)), 1.5, accent);
+        painter.rect_filled(
+            Rect::from_min_size(
+                pos2(inner.left() + inner.width() * 0.4, inner.top() + inner.height() * 0.58),
+                vec2(inner.width() * 0.58, inner.height() * 0.4),
+            ),
+            1.5,
+            ink,
+        );
+    } else {
+        painter.rect_filled(Rect::from_min_size(inner.min, vec2(inner.width() * 0.32, inner.height())), 1.0, accent);
+        painter.rect_filled(
+            Rect::from_min_size(
+                pos2(inner.left() + inner.width() * 0.4, inner.bottom() - inner.height() * 0.3),
+                vec2(inner.width() * 0.6, inner.height() * 0.3),
+            ),
+            1.0,
+            ink,
+        );
+    }
 }
 
 /// What a click on a panel drop-down row asks for.

@@ -60,9 +60,17 @@ pub fn submit(app: &mut SolveApp, line: &str) {
 
 pub fn palette_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    egui::Panel::bottom("sc_palette").exact_size(28.0).frame(egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin::symmetric(8, 3))).show(
-        ui,
-        |ui| {
+    egui::Panel::bottom("sc_palette")
+        .exact_size(28.0)
+        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin::symmetric(8, 3)))
+        .show(ui, |ui| palette_body(app, ui));
+}
+
+/// The command line's contents: the docked bar and the floating card (`floating`) both draw it.
+pub(crate) fn palette_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    {
+        {
             ui.horizontal_centered(|ui| {
                 ui.label(RichText::new("›").strong().color(t.accent));
                 let r = ui.add(
@@ -84,8 +92,8 @@ pub fn palette_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new(last).size(11.5).color(t.text_dim));
                 }
             });
-        },
-    );
+        }
+    }
 }
 
 /// The search popup (S).

@@ -50,6 +50,8 @@ pub struct ViewportState {
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
     pub(crate) dialog_rect: Option<Rect>,
+    /// The floating cards drawn this frame (`floating`): the controls and the framing keep clear of them.
+    pub(crate) float_cards: Vec<Rect>,
     pub gpu: Option<GpuTarget>,
     slot: SceneSlot,
     key: u64,
@@ -3050,7 +3052,14 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, scale: f32) {
                 .into_iter()
                 .flatten()
                 .collect();
-        app.viewport.layout = Some(crate::viewport_layout::Layout::new(rect, &docks, scale, app.preferences.navigator_style));
+        let mut docks = docks;
+        let (mut top, mut bottom) = (0.0, 0.0);
+        if app.preferences.floating_layout {
+            docks.extend(app.viewport.float_cards.iter().copied());
+            (top, bottom) =
+                crate::floating::insets(&app.viewport.float_cards, rect, crate::viewport::axis_view_size(app.preferences.navigator_style));
+        }
+        app.viewport.layout = Some(crate::viewport_layout::Layout::with_insets(rect, &docks, scale, app.preferences.navigator_style, top, bottom));
     }
 }
 

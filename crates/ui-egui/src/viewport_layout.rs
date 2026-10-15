@@ -39,18 +39,27 @@ fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
 }
 
 impl Layout {
+    #[cfg(test)]
     pub fn new(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle) -> Self {
+        Self::with_insets(viewport, docks, scale, style, 0.0, 0.0)
+    }
+
+    /// As `new`, with the navigation cube `top` points below the viewport's top edge and the
+    /// navigation bar `bottom` points above its bottom edge (floating panels sit over those edges).
+    pub fn with_insets(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, top: f32, bottom: f32) -> Self {
+        let top = if top.is_finite() { top.clamp(0.0, viewport.height()) } else { 0.0 };
+        let bottom = if bottom.is_finite() { bottom.clamp(0.0, viewport.height()) } else { 0.0 };
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         let mut obstacles: Vec<_> = docks.iter().take(6).copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
         let available = viewport;
         let cube_size = super::viewport::axis_view_size(style);
-        let mut axis_view = if available.width() >= cube_size && available.height() >= cube_size {
-            Rect::from_min_size(pos2(available.right() - cube_size, available.top()), vec2(cube_size, cube_size))
+        let mut axis_view = if available.width() >= cube_size && available.height() >= cube_size + top {
+            Rect::from_min_size(pos2(available.right() - cube_size, available.top() + top), vec2(cube_size, cube_size))
         } else {
             Rect::NOTHING
         };
-        let nav_space = viewport;
+        let nav_space = Rect::from_min_max(viewport.min, pos2(viewport.right(), viewport.bottom() - bottom));
         let columns = ((nav_space.width() - 10.0) / 30.0).floor().clamp(1.0, 10.0);
         let nav_height = (10.0 / columns).ceil() * 30.0;
         let navigation = if nav_space.width() >= columns * 30.0 + 10.0 && nav_space.height() >= nav_height + 7.0 {
@@ -61,9 +70,9 @@ impl Layout {
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
-            let compact = (navigation.top() - viewport.top() - 4.0).min(cube_size);
+            let compact = (navigation.top() - viewport.top() - top - 4.0).min(cube_size);
             axis_view = if style == crate::prefs::NavigatorStyle::Cube && compact >= 96.0 {
-                Rect::from_min_size(pos2(viewport.right() - compact, viewport.top()), vec2(compact, compact))
+                Rect::from_min_size(pos2(viewport.right() - compact, viewport.top() + top), vec2(compact, compact))
             } else {
                 Rect::NOTHING
             };

@@ -486,15 +486,43 @@ pub fn browser_below_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn browser_panel(app: &mut SolveApp, ui: &mut egui::Ui, timeline_above: bool) {
     let t = Tokens::get();
-    app.tree.order.clear();
-    DRAWN.with(|d| d.borrow_mut().clear());
-    OCCURRENCES.with(|d| d.borrow_mut().clear());
+    begin_browser(app);
     let mut acts = Actions::default();
     egui::Panel::left("sc_browser")
         .exact_size(250.0)
         .resizable(false)
         .frame(egui::Frame::NONE.fill(t.panel).inner_margin(egui::Margin::symmetric(6, 6)))
-        .show(ui, |ui| {
+        .show(ui, |ui| browser_body(app, ui, timeline_above, &mut acts));
+    finish_browser(app, ui, acts);
+}
+
+/// The floating browser card (`floating`): the same contents as the docked panel, in a card the
+/// user can move, resize and minimize.
+pub fn browser_floating(app: &mut SolveApp, ui: &mut egui::Ui, timeline_above: bool) {
+    begin_browser(app);
+    let avail = ui.available_rect_before_wrap();
+    let toolbar_h = crate::floating::STRIP_H + crate::floating::TOOLBAR_H + 24.0;
+    let stack = 2.0 * (crate::floating::STRIP_H + 12.0) + crate::floating::TIMELINE_H + crate::floating::PALETTE_H + 8.0;
+    let height = (avail.height() - toolbar_h - stack - 4.0 * crate::floating::MARGIN).clamp(220.0, 760.0);
+    let mut acts = Actions::default();
+    crate::floating::card(app, ui, crate::floating::Which::Browser, crate::i18n::tr_label("BROWSER"), vec2(250.0, height), |app, ui| {
+        browser_body(app, ui, timeline_above, &mut acts);
+    });
+    finish_browser(app, ui, acts);
+}
+
+/// What a frame of the browser starts from: its row lists are rebuilt as it draws.
+fn begin_browser(app: &mut SolveApp) {
+    app.tree.order.clear();
+    DRAWN.with(|d| d.borrow_mut().clear());
+    OCCURRENCES.with(|d| d.borrow_mut().clear());
+}
+
+/// The browser's contents (the docked panel's, or the floating card's), drawn into `ui`.
+fn browser_body(app: &mut SolveApp, ui: &mut egui::Ui, timeline_above: bool, acts: &mut Actions) {
+    let t = Tokens::get();
+    {
+        {
             if timeline_above {
                 let available = ui.available_height();
                 let browser_collapsed = app.preferences.timeline_left_browser_collapsed;
@@ -528,19 +556,22 @@ fn browser_panel(app: &mut SolveApp, ui: &mut egui::Ui, timeline_above: bool) {
                 }
                 if !browser_collapsed {
                     ui.add_space(4.0);
-                    browser_rows(app, ui, &mut acts);
+                    browser_rows(app, ui, acts);
                 }
             } else {
-                browser_contents(app, ui, &mut acts);
+                browser_contents(app, ui, acts);
             }
-        });
-    finish_browser(app, ui, acts);
+        }
+    }
 }
 
 fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
     let t = Tokens::get();
-    ui.label(RichText::new(crate::i18n::tr_label("BROWSER")).size(11.0).strong().color(t.text_dim));
-    ui.add_space(4.0);
+    // A floating card already carries the title on its strip.
+    if !app.preferences.floating_layout {
+        ui.label(RichText::new(crate::i18n::tr_label("BROWSER")).size(11.0).strong().color(t.text_dim));
+        ui.add_space(4.0);
+    }
     browser_rows(app, ui, acts);
 }
 

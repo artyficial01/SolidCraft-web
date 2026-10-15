@@ -80,3 +80,20 @@ lightly damped spring transition and a small boundary margin to prevent flicker.
 On desktop, Ctrl/Cmd+Plus (or Equals) enlarges the interface, Ctrl/Cmd+Minus reduces it,
 and Ctrl/Cmd+0 restores 100%. These shortcuts update the UI scale preference. The UI scale
 slider in Preferences applies the new layout when released, so it stays still while dragging.
+
+## Floating panels
+
+By default the toolbar, browser, timeline and command line are docked around the viewport.
+**Preferences › General › Panel layout › Floating panels** (or the layout button in the title bar,
+next to the theme button) lets them float over a viewport that fills the whole window instead.
+
+- **Move** a panel by dragging its title strip. It stays inside the window, and the view cube and
+  navigation bar make room for any panel placed over them.
+- **Minimize** a panel with the button at the right end of its strip: it shrinks to the strip
+  alone, and the same button opens it again. The second layout button in the title bar minimizes
+  or restores every panel at once, for a clear canvas.
+- **Resize** the browser by dragging the corner grip at its bottom right.
+- **Reset positions** (Preferences, next to the setting) puts every panel back where it started.
+
+Positions, sizes and minimized panels are saved with the other preferences. The light and dark
+themes both apply. Switching back to **Docked** restores the classic layout; nothing else changes.

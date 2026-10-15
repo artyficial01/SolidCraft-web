@@ -246,14 +246,20 @@ async fn sync_all(files: &Rc<Files>) -> Result<Option<usize>, String> {
                     let copy = copy_name(name, "server copy");
                     store_local(files, &copy, theirs, None).await?;
                     push(name).await?;
-                    files.say(format!("{name} changed here and on the server. This browser's is newer and was sent; the server's is kept as {copy}."), false);
+                    files.say(
+                        format!("{name} changed here and on the server. This browser's is newer and was sent; the server's is kept as {copy}."),
+                        false,
+                    );
                 } else {
                     // The server's is newer: keep this browser's as a copy, take the server's.
                     let copy = copy_name(name, "this browser");
                     store_local(files, &copy, mine, None).await?;
                     store_local(files, name, theirs, Some(rm)).await?;
                     pulled += 1;
-                    files.say(format!("{name} changed here and on the server. The server's is newer and was taken; this browser's is kept as {copy}."), false);
+                    files.say(
+                        format!("{name} changed here and on the server. The server's is newer and was taken; this browser's is kept as {copy}."),
+                        false,
+                    );
                 }
             }
         }

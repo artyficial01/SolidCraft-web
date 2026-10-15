@@ -36,6 +36,7 @@ pub mod dim_view;
 mod dimension_create_ui_tests;
 pub mod documents;
 pub mod drag_snap;
+pub mod floating;
 pub mod fonts;
 pub mod frame;
 pub mod gizmo;
@@ -1142,20 +1143,25 @@ impl SolveApp {
                 return;
             }
         }
-        toolbar::toolbar(self, ui);
-        let left_timeline = self.ui.show_timeline && self.preferences.timeline_left;
-        if self.ui.show_timeline && !left_timeline {
-            timeline::timeline(self, ui);
-        }
-        palette::palette_bar(self, ui);
-        if self.ui.show_browser {
-            if left_timeline {
-                browser::browser_below_timeline(self, ui);
-            } else {
-                browser::browser(self, ui);
+        if self.preferences.floating_layout {
+            floating::panels(self, ui);
+        } else {
+            self.viewport.float_cards.clear();
+            toolbar::toolbar(self, ui);
+            let left_timeline = self.ui.show_timeline && self.preferences.timeline_left;
+            if self.ui.show_timeline && !left_timeline {
+                timeline::timeline(self, ui);
             }
-        } else if left_timeline {
-            timeline_left::left_panel(self, ui);
+            palette::palette_bar(self, ui);
+            if self.ui.show_browser {
+                if left_timeline {
+                    browser::browser_below_timeline(self, ui);
+                } else {
+                    browser::browser(self, ui);
+                }
+            } else if left_timeline {
+                timeline_left::left_panel(self, ui);
+            }
         }
         preview::update(self, ui.ctx());
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
